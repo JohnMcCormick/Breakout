@@ -24,31 +24,67 @@ const drawPaddle = (canvasContext, { paddle }) => {
   canvasContext.strokeRect(paddle.x - (paddle.width / 2), paddle.y - (paddle.height / 2), paddle.width, paddle.height )
 }
 
+const drawBlocks = (canvasContext, { blockWidth, blockHeight, blocks }) => {
+  blocks.forEach((blockRow) => blockRow.forEach(({ active, x, y }) => {
+    active && canvasContext.fillRect(x, y, blockWidth, blockHeight)
+  }));
+}
+
 const draw = (canvasContext, gameState) => {
   const { stage } = gameState;
   canvasContext.clearRect(0, 0, stage.width, stage.height);
 
-  drawPerformanceMetrics(canvasContext, gameState);
+  // drawPerformanceMetrics(canvasContext, gameState);
   drawBall(canvasContext, gameState);
   drawPaddle(canvasContext, gameState);
+  drawBlocks(canvasContext, gameState)
 };
 
-const detectBallCollisions = ({ stage, ball, paddle }) => {
+const isBallInRect = (ball, rectX, rectY, rectWidth, rectHeight) => {
+  if (ball.x >= rectX - (rectWidth / 2) - ball.radius 
+      && ball.x <= rectX + (rectWidth / 2) + ball.radius 
+      && ball.y >= rectY - (rectHeight / 2) - ball.radius 
+      && ball.y <= rectY + (rectHeight / 2) + ball.radius) {
+    return true;
+  }
+  return false;
+}
+
+const detectBallCollisions = ({ stage, ball, paddle, blocks, blockWidth, blockHeight }) => {
+  // Detect horizontal boundaries
   if (ball.x <= ball.radius || ball.x >= stage.width - ball.radius) {
     ball.xVelocity *= -1;
   }
+
+  // Detect vertical boundaries
   if (ball.y <= ball.radius || ball.y >= stage.height - ball.radius) {
     ball.yVelocity *= -1;
   }
-
-  if (ball.x >= paddle.x - (paddle.width / 2) - ball.radius && ball.x <= paddle.x + (paddle.width / 2) + ball.radius && ball.y >= paddle.y - (paddle.height / 2) - ball.radius && ball.y <= paddle.y + (paddle.height / 2) + ball.radius) {
-    ball.yVelocity *= -1;
-    const distanceFromCenter = ball.x - paddle.x;
-    ball.xVelocity = distanceFromCenter * .01;
+  
+  // Detect paddle
+  if (isBallInRect(ball, paddle.x, paddle.y, paddle.width, paddle.height)) {
+    if (ball.yVelocity > 0) {
+      ball.yVelocity *= -1;
+      const distanceFromCenter = ball.x - paddle.x;
+      ball.xVelocity = distanceFromCenter * .01;
+    }
   }
+  
+  // Detect blocks
+  blocks.forEach((blockRow, yIndex) => blockRow.map((block, xIndex) => {
+    let { active } = block;
+    if (active && isBallInRect(ball, block.x, block.y, blockWidth, blockHeight)) {
+      ball.yVelocity *= -1;
+      blocks[yIndex][xIndex].active = false;
+    }
+  }));
 }
 
-const moveBall = ({ deltaTime, ball }) => {
+const moveBall = ({ started, deltaTime, ball, paddle }) => {
+  if (!started) {
+    ball.x = paddle.x
+  }
+
   ball.x += ball.xVelocity * deltaTime;
   ball.y += ball.yVelocity * deltaTime;
 }
@@ -63,8 +99,8 @@ const loop = (timestamp, canvasContext, gameState) => {
   gameState.timestamp = timestamp;
 
   detectBallCollisions(gameState);
-  moveBall(gameState);
   movePaddle(gameState);
+  moveBall(gameState);
 
   draw(canvasContext, gameState);
 
@@ -81,6 +117,14 @@ const init = () => {
 
   const stage = { width: canvas.width, height: canvas.height };
 
+  const blockWidth = 48, blockHeight = 18;
+
+  const numberOfBlocksHorizontally = stage.width / (blockWidth + 2);
+  const numberOfBlocksVertically = Math.floor(stage.height / 2 / (blockHeight + 2));
+  const blocks = new Array(numberOfBlocksVertically).fill()
+    .map((_, yIndex) => new Array(numberOfBlocksHorizontally - 2).fill()
+    .map((_, xIndex) => ({ active: true, x: ((xIndex + 1) * blockWidth) + (xIndex * 2), y: ((yIndex + 1) * blockHeight) + (yIndex * 2)})));
+
   const paddle = {
     x: stage.width / 2,
     y: stage.height - (stage.height / 10),
@@ -95,23 +139,34 @@ const init = () => {
     mouse.y = event.clientY - canvasRect.top
   });
   
+  const ballRadius = 10;
   const ball = {
     x: stage.width / 2,
-    y: stage.height / 2,
-    radius: 10,
+    y: paddle.y - (paddle.height / 2) - ballRadius,
+    radius: ballRadius,
     xVelocity: 0,
-    yVelocity: 0.5,
+    yVelocity: 0,
   };
 
   const gameState = {
+    started: false,
     stage,
     mouse,
     deltaTime: 0,
-    timestamp: 0,
     timestampPrev: 0,
     ball,
     paddle,
+    blockWidth,
+    blockHeight,
+    blocks
   };
+
+  window.addEventListener("mousedown", () => {
+    if (!gameState.started) {
+      gameState.started = true;
+      ball.yVelocity = -0.5;
+    }
+  })
 
   window.requestAnimationFrame((timestamp) =>
     loop(timestamp, canvasContext, gameState)
